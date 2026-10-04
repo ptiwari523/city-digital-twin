@@ -1,33 +1,44 @@
 import requests
+import json
+import os
 from distance_cal import distance_calculation_haversine
 
-headers = {
-    "User-Agent": "CityDigitalTwin/0.1"
-}
+# 1. Get data
+if os.path.exists("data/osm_data.json"):
+    with open("data/osm_data.json", "r") as file:
+        opass_data = json.load(file)
+else:
+    
+    headers = {
+        "User-Agent": "CityDigitalTwin/0.1"
+    }
 
-opass_url = "https://overpass-api.de/api/interpreter"
-opass_query = """
-[out:json];
+    opass_url = "https://overpass-api.de/api/interpreter"
+    opass_query = """
+    [out:json];
 
-(
-  way["name"="Janpath"](28.61,77.20,28.64,77.23);
-  way["name"="Outer Circle"](28.61,77.20,28.64,77.23);
-);
+    (
+    way["name"="Janpath"](28.61,77.20,28.64,77.23);
+    way["name"="Outer Circle"](28.61,77.20,28.64,77.23);
+    );
 
-out body;
->;
-out skel qt; 
-"""
-response = requests.get(
-     opass_url, 
-     params={"data":opass_query}, 
-     headers=headers
-     )
+    out body;
+    >;
+    out skel qt; 
+    """
+    response = requests.get(
+        opass_url, 
+        params={"data":opass_query}, 
+        headers=headers
+        )
 
-print(response.status_code)
+    print(response.status_code)
+    opass_data = response.json()
 
-opass_data = response.json()
+    with open("data/osm_data.json", "w") as file:
+        json.dump(opass_data, file, indent=4)
 
+# 2. Process data
 # Find nodes belonging to each road
 janpath_nodes = set()
 outer_circle_nodes = set()
@@ -47,7 +58,7 @@ shared_nodes = janpath_nodes & outer_circle_nodes
 node_coordinates = {}
 
 for element in opass_data["elements"]:
-        if element["type"] == "node" and element["id"] in shared_nodes:
+        if element["type"] == "node":
             node_coordinates[element['id']] = (
                  element['lat'], 
                  element['lon']
@@ -64,27 +75,34 @@ for element in opass_data["elements"]:
         if found_all:
             nodes = element["nodes"]
 
-            # Find positions of the shared nodes
-            positions = []
-            for node in shared_nodes:
-                positions.append(nodes.index(node))
-            positions.sort()
+            segments = []
 
-            # Get the positions
-            start_position = positions[0]
-            end_position = positions[1]
+            for start_node, end_node in zip(nodes, nodes[1:]):
+                start_coordinates = node_coordinates[start_node]
+                end_coordinates = node_coordinates[end_node]
 
-            # Get the actual node IDs
-            start_node = nodes[start_position]
-            end_node = nodes[end_position]
+                start_lat, start_lon = start_coordinates
+                end_lat, end_lon = end_coordinates
 
-            # Get their coordinates
-            start_coordinates = node_coordinates[start_node]
-            end_coordinates = node_coordinates[end_node]
+                distance = distance_calculation_haversine(
+                    start_lat,
+                    start_lon,
+                    end_lat,
+                    end_lon
+                )
 
-            start_lat, start_lon = start_coordinates
-            end_lat, end_lon = end_coordinates
+                segment = {
+                    "start_node": start_node,
+                    "end_node": end_node,
+                    "length": distance,
+                    "road_name": element["tags"]["name"],
+                    "lanes": element["tags"]["lanes"],
+                    "oneway": element["tags"]["oneway"]
+                            }
+                segments.append(segment)
 
-            distance = distance_calculation_haversine(start_lat, start_lon, end_lat, end_lon)
-            print(f"{distance:.2f} meters")
+            for segment in segments:
+                print(json.dumps(segment, indent=4))
+            print(len(segments))
+
      
